@@ -118,6 +118,9 @@ def backup_list(liste, title, dirname):
     write id from liste into ./dirname/title.csv
     """
     print("Writing", title, "as backup...", end="\t")
+    if len(liste) == 0:
+        print("nothing to write")
+        return
     with open(f"./{dirname}/{title}.csv", "w") as f:
         f.write("\n".join([str(i[1]) for i in liste]))
         if (len(liste) > 0):
@@ -137,7 +140,7 @@ def get_stuff_to_delete(token, dirname):
 
     # begining with playlists
     print("###\nReading playlists")
-    stuff += get_all_saved(token, "playlists", "playlist")
+    stuff += get_all_saved(token, "playlist")
     print("Playlists should be saved by other process")
     print("Adding", len(stuff), "items to delete")
 
