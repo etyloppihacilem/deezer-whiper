@@ -85,9 +85,14 @@ def save_all_playlists(token):
         with open(filename, 'w') as file_descriptor:
             json.dump(playlist, file_descriptor)
             file_descriptor.close()
+    return directory
 
-def get_all_saved(token, thing, name):
+def get_all_saved(token, name):
+    """
+    Recover all id of element name from user profile
+    """
     go = True
+    thing = name + "s"
     link = "https://api.deezer.com/user/me/{}&access_token={}".format(thing, token)
     ret = list()
     while go:
@@ -96,7 +101,7 @@ def get_all_saved(token, thing, name):
         for item in req.json()['data']:
             if (name == "playlist"):
                 try:
-                    if (item["is_loved_track"]):
+                    if (item["is_loved_track"]): # because we cannot delete loved track playlist
                         continue
                 except KeyError:
                     pass
@@ -108,15 +113,26 @@ def get_all_saved(token, thing, name):
             go = False
     return ret
 
-def backup_list(liste, title):
+def backup_list(liste, title, dirname):
+    """
+    write id from liste into ./dirname/title.csv
+    """
     print("Writing", title, "as backup...", end="\t")
-    with open(f"./{title}.csv", "w") as f:
+    with open(f"./{dirname}/{title}.csv", "w") as f:
         f.write("\n".join([str(i[1]) for i in liste]))
         if (len(liste) > 0):
             f.write("\n")
     print("done")
 
-def get_stuff_to_delete(token):
+def get_stuff_to_delete(token, dirname):
+    """
+    Get id of all :
+     - playlists
+     - albums
+     - artists
+     - tracks
+    from user
+    """
     stuff = []
 
     # begining with playlists
@@ -127,31 +143,33 @@ def get_stuff_to_delete(token):
 
     # then with albums
     print("###\nReading albums")
-    to_add = get_all_saved(token, "albums", "album")
-    backup_list(to_add, "albums")
+    to_add = get_all_saved(token, "album")
+    backup_list(to_add, "albums", dirname)
     print("Adding", len(to_add), "items to delete")
     stuff += to_add
 
     # then with artists
     print("###\nReading artists")
-    to_add = get_all_saved(token, "artists", "artist")
-    backup_list(to_add, "artists")
+    to_add = get_all_saved(token, "artist")
+    backup_list(to_add, "artists", dirname)
     print("Adding", len(to_add), "items to delete")
     stuff += to_add
 
     # then with tracks
     print("###\nReading tracks")
-    to_add = get_all_saved(token, "tracks", "track")
-    backup_list(to_add, "tracks")
+    to_add = get_all_saved(token, "track")
+    backup_list(to_add, "tracks", dirname)
     print("Adding", len(to_add), "items to delete")
     stuff += to_add
-    del to_add
 
-    print("***\nTotal to delete :", len(stuff))
+    print("***\nTotal to delete :", len(stuff), "element(s)")
     print("Estimated time :", len(stuff) // 600, "minutes", (len(stuff) % 600) // 10, "secondes")
     return (stuff)
 
 def deezer_delete(self, stuff, token):
+    """
+    delete every item in stuff
+    """
     size = len(str(len(stuff)))
     for i, item in enumerate(stuff):
         print("deleting", str(i).zfill(size), "/", len(stuff), "...", end="\t")
@@ -160,7 +178,7 @@ def deezer_delete(self, stuff, token):
         req = requests.get(link)
         if (req.text != "true"):
             self.wfile.write(req.text.encode())
-        if (item[0] == "playlist"):
+        if (item[0] == "playlist"): # because you do not delete the same way saved playlists and playlists created by user
             link = "https://api.deezer.com/playlist/{}?request_method=DELETE&access_token={}".format(item[1], token)
             print(link)
             req = requests.get(link)
@@ -171,8 +189,12 @@ def deezer_delete(self, stuff, token):
         else:
             print("done")
 
-def run_delete(self, token):
-    to_delete = get_stuff_to_delete(token)
+def run_delete(self, token, dirname):
+    """
+    First recover items and saves them
+    then delete after confirmation
+    """
+    to_delete = get_stuff_to_delete(token, dirname)
     if (len(to_delete) == 0):
         print("Nothing to delete, quitting")
         exit()
@@ -206,13 +228,14 @@ class Server(BaseHTTPRequestHandler):
             print(req.text)
             token = req.text.split('=')[1].split('&')[0]
             self._set_headers()
-            save_all_playlists(token)
-            run_delete(self, token)
+            dirname = save_all_playlists(token)
+            run_delete(self, token, dirname)
 
         self.wfile.write(
             "<html><body><h1>hi!</h1>" \
             "<script>alert('You can now close this page')</script></body></html>".encode()
         )
+        exit() # because end i guess
 
     def do_HEAD(self):
         self._set_headers()

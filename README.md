@@ -4,8 +4,9 @@ Loved tracks, saved albums, loved artists, saved and created playlists : all gon
 
 Forked from [yfe404/deezer-backup](https://github.com/yfe404/deezer-backup) original script.
 
-## Disclaimer
+## Disclaimers
 ***Use at your own risks***. I can not be held responsible to the consequences of this script on your account.
+
 ***Only use on your own account***. This is supposed to make sens.
 
 ## Usage
