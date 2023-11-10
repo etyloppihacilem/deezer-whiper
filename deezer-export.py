@@ -39,6 +39,7 @@ def get_playlist(token, playlist_id):
     for title in playlist_item['tracks']['data']:
         song = dict(
             [
+                ('id', title['id']),
                 ('title', title['title']),
                 ('artist', title['artist']['name']),
                 ('album', title['album']['title'])
@@ -60,14 +61,20 @@ def save_all_playlists(token):
     Returns:
         None
     """
-    req = requests.get("https://api.deezer.com/user/me/playlists&access_token={}".format(token))
+    go = True
+    link = "https://api.deezer.com/user/me/playlists&access_token={}".format(token)
     playlists = list()
+    while go:
+        req = requests.get(link)
+        for item_playlist in req.json()['data']:
+            playlist_id = item_playlist['id']
+            playlist = get_playlist(token, playlist_id)
 
-    for item_playlist in req.json()['data']:
-        playlist_id = item_playlist['id']
-        playlist = get_playlist(token, playlist_id)
-        
-        playlists.append(playlist)
+            playlists.append(playlist)
+        try:
+            link = req.json()["next"] + f"&access_token={token}"
+        except KeyError:
+            go = False
 
     directory = 'playlists_{}'.format(time.time())
     if not os.path.exists(directory):
@@ -79,6 +86,101 @@ def save_all_playlists(token):
             json.dump(playlist, file_descriptor)
             file_descriptor.close()
 
+def get_all_saved(token, thing, name):
+    go = True
+    link = "https://api.deezer.com/user/me/{}&access_token={}".format(thing, token)
+    ret = list()
+    while go:
+        req = requests.get(link)
+
+        for item in req.json()['data']:
+            if (name == "playlist"):
+                try:
+                    if (item["is_loved_track"]):
+                        continue
+                except KeyError:
+                    pass
+            deezer_id = [name, item['id']]
+            ret.append(deezer_id)
+        try:
+            link = req.json()["next"] + f"&access_token={token}"
+        except KeyError:
+            go = False
+    return ret
+
+def backup_list(liste, title):
+    print("Writing", title, "as backup...", end="\t")
+    with open(f"./{title}.csv", "w") as f:
+        f.write("\n".join([str(i[1]) for i in liste]))
+        if (len(liste) > 0):
+            f.write("\n")
+    print("done")
+
+def get_stuff_to_delete(token):
+    stuff = []
+
+    # begining with playlists
+    print("###\nReading playlists")
+    stuff += get_all_saved(token, "playlists", "playlist")
+    print("Playlists should be saved by other process")
+    print("Adding", len(stuff), "items to delete")
+
+    # then with albums
+    print("###\nReading albums")
+    to_add = get_all_saved(token, "albums", "album")
+    backup_list(to_add, "albums")
+    print("Adding", len(to_add), "items to delete")
+    stuff += to_add
+
+    # then with artists
+    print("###\nReading artists")
+    to_add = get_all_saved(token, "artists", "artist")
+    backup_list(to_add, "artists")
+    print("Adding", len(to_add), "items to delete")
+    stuff += to_add
+
+    # then with tracks
+    print("###\nReading tracks")
+    to_add = get_all_saved(token, "tracks", "track")
+    backup_list(to_add, "tracks")
+    print("Adding", len(to_add), "items to delete")
+    stuff += to_add
+    del to_add
+
+    print("***\nTotal to delete :", len(stuff))
+    print("Estimated time :", len(stuff) // 600, "minutes", (len(stuff) % 600) // 10, "secondes")
+    return (stuff)
+
+def deezer_delete(self, stuff, token):
+    size = len(str(len(stuff)))
+    for i, item in enumerate(stuff):
+        print("deleting", str(i).zfill(size), "/", len(stuff), "...", end="\t")
+        thing = item[0] + "s"
+        link = "https://api.deezer.com/user/me/{}&request_method=DELETE&access_token={}&{}_id={}".format(thing, token, item[0], item[1])
+        req = requests.get(link)
+        if (req.text != "true"):
+            self.wfile.write(req.text.encode())
+        if (item[0] == "playlist"):
+            link = "https://api.deezer.com/playlist/{}?request_method=DELETE&access_token={}".format(item[1], token)
+            print(link)
+            req = requests.get(link)
+            if (req.text != "true"):
+                self.wfile.write(req.text.encode())
+        if (req.status_code != 200):
+            print("error", req.status_code, "with", item[0], item[1])
+        else:
+            print("done")
+
+def run_delete(self, token):
+    to_delete = get_stuff_to_delete(token)
+    if (len(to_delete) == 0):
+        print("Nothing to delete, quitting")
+        exit()
+    if (input("Are you sure you wish to wipe your deezer account ? (y) ") != "y"):
+        print("Aborted")
+        exit()
+    deezer_delete(self, to_delete, token)
+    print("All done, you can quit")
 
 class Server(BaseHTTPRequestHandler):
     """Basic HTTP Server to serve as redirection URI and obtain the token from Deezer
@@ -103,9 +205,10 @@ class Server(BaseHTTPRequestHandler):
             time.sleep(5)
             print(req.text)
             token = req.text.split('=')[1].split('&')[0]
+            self._set_headers()
             save_all_playlists(token)
+            run_delete(self, token)
 
-        self._set_headers()
         self.wfile.write(
             "<html><body><h1>hi!</h1>" \
             "<script>alert('You can now close this page')</script></body></html>".encode()
@@ -141,6 +244,6 @@ if __name__ == "__main__":
     HTTP_SERVER.start()
     URL = "https://connect.deezer.com" \
           "/oauth/auth.php?app_id={}&redirect_uri=http://127.0.0.1:7766/" \
-          "authfinish&perms=basic_access,email".format(APP_ID)
+          "authfinish&perms=delete_library,manage_library,email,basic_access".format(APP_ID)
     webbrowser.open(URL)
     HTTP_SERVER.join()
